@@ -16,6 +16,8 @@ export function buildStateFor(room: MBRoom, viewerId: string | null) {
         canRoll: canRoll(p),
         alive: p.alive,
         finished: p.finished,
+        exitReason: p.exitReason ?? null,
+        team: p.team,
         coupsFourres: p.coupsFourres,
         // Only the viewer sees their own hand.
         ...(p.userId === viewerId ? { hand: p.hand } : {}),
@@ -38,6 +40,9 @@ export function buildStateFor(room: MBRoom, viewerId: string | null) {
         turnStartedAt: room.turnStartedAt,
         turnDuration: room.turnDuration,
         winnerUserId: room.winnerUserId,
+        teamMode: room.teamMode,
+        teamDistance: room.teamDistance,
+        winningTeam: room.winningTeam,
         log: room.log.slice(-10),
         players,
         spectator: viewerId ? !room.players.some(p => p.userId === viewerId) : true,

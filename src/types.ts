@@ -49,7 +49,12 @@ export interface MBPlayer {
     coupsFourres: number;
     alive: boolean;                   // still in the running (not surrendered/kicked)
     finished: boolean;                // reached the target distance
+    exitReason?: 'abandon' | 'afk' | null; // why the player left, if not alive
+    team: 0 | 1 | null;               // 2v2 team, null in free-for-all
 }
+
+export type TeamMode = 'none' | '2v2';
+export type TeamDistance = 'individual' | 'shared';
 
 export type Phase = 'playing' | 'ended';
 
@@ -87,6 +92,9 @@ export interface MBRoom {
     socketIds: Map<string, string>;
     disconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
     winnerUserId: string | null;
+    teamMode: TeamMode;
+    teamDistance: TeamDistance;       // how the target is reached in 2v2
+    winningTeam: 0 | 1 | null;        // set at game end in 2v2
 }
 
 export interface ConfiguredPlayer {
@@ -98,4 +106,6 @@ export interface ConfiguredPlayer {
 
 export interface MBOptions {
     target: number; // 700 | 1000
+    teamMode?: TeamMode;
+    teamDistance?: TeamDistance;
 }

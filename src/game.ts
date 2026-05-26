@@ -39,12 +39,13 @@ export function createPlayer(raw: ConfiguredPlayer, drawPile: Card[]): MBPlayer 
         hand,
         distance: 0,
         distance200Count: 0,
-        battleTop: null,
+        battleTop: 'go', // players start with a green light (can roll immediately)
         speedLimited: false,
         safeties: [],
         coupsFourres: 0,
         alive: true,
         finished: false,
+        team: null,
     };
 }
 
@@ -86,12 +87,30 @@ export function findPlayerIndex(room: MBRoom, userId: string): number {
     return room.players.findIndex(p => p.userId === userId);
 }
 
+// ── Teams (2v2) ────────────────────────────────────────────────────────────────
+
+export function sameTeam(a: MBPlayer, b: MBPlayer): boolean {
+    return a.team != null && a.team === b.team;
+}
+
+export function teamDistanceOf(room: MBRoom, team: 0 | 1): number {
+    return room.players.filter(p => p.team === team).reduce((s, p) => s + p.distance, 0);
+}
+
+/** Distance that counts toward the target for this player (team sum in shared 2v2, else own). */
+export function progressOf(room: MBRoom, player: MBPlayer): number {
+    if (room.teamMode === '2v2' && room.teamDistance === 'shared' && player.team != null) {
+        return teamDistanceOf(room, player.team);
+    }
+    return player.distance;
+}
+
 /** Can `attacker` legally drop `hazard` on `target`? */
 export function canAttack(target: MBPlayer, hazard: HazardType): boolean {
     if (!target.alive || target.finished) return false;
     if (hasSafety(target, HAZARD_SAFETY[hazard])) return false;
     if (hazard === 'speedLimit') return !target.speedLimited;
-    // battle hazards (stop/accident/outOfGas/flatTire): target must be rolling.
+    // Battle hazards: the target must have a green light (be able to roll).
     return canRoll(target);
 }
 
@@ -106,32 +125,41 @@ export function validatePlay(
 ): PlayValidation {
     switch (card.kind) {
         case 'distance': {
+            if (target && target.userId !== player.userId) return { ok: false, reason: 'distance_self_only' };
             if (!canRoll(player)) return { ok: false, reason: 'not_rolling' };
             const km = card.km!;
             if (isSpeedLimited(player) && km > 50) return { ok: false, reason: 'speed_limited' };
             if (km === 200 && player.distance200Count >= 2) return { ok: false, reason: 'too_many_200' };
+            // Overshoot is capped per player (own distance). In shared 2v2 the team total may exceed
+            // the target — that just wins the round (checked at apply time).
             if (player.distance + km > room.target) return { ok: false, reason: 'overshoot' };
             return { ok: true };
         }
         case 'remedy': {
+            // A remedy may be played on oneself, or on a teammate to help them (2v2).
+            const subject = target ?? player;
+            if (subject.userId !== player.userId && !sameTeam(player, subject)) return { ok: false, reason: 'remedy_ally_only' };
+            if (!subject.alive || subject.finished) return { ok: false, reason: 'bad_subject' };
             const r = card.remedy!;
             if (r === 'go') {
-                if (player.battleTop === 'go') return { ok: false, reason: 'already_go' };
-                if (player.battleTop === 'accident' || player.battleTop === 'outOfGas' || player.battleTop === 'flatTire')
+                if (subject.battleTop === 'go') return { ok: false, reason: 'already_go' };
+                if (subject.battleTop === 'accident' || subject.battleTop === 'outOfGas' || subject.battleTop === 'flatTire')
                     return { ok: false, reason: 'fix_hazard_first' };
                 return { ok: true };
             }
-            if (r === 'endLimit') return player.speedLimited ? { ok: true } : { ok: false, reason: 'not_limited' };
-            if (r === 'repairs') return player.battleTop === 'accident' ? { ok: true } : { ok: false, reason: 'no_accident' };
-            if (r === 'gas') return player.battleTop === 'outOfGas' ? { ok: true } : { ok: false, reason: 'no_gas' };
-            if (r === 'spareTire') return player.battleTop === 'flatTire' ? { ok: true } : { ok: false, reason: 'no_flat' };
+            if (r === 'endLimit') return subject.speedLimited ? { ok: true } : { ok: false, reason: 'not_limited' };
+            if (r === 'repairs') return subject.battleTop === 'accident' ? { ok: true } : { ok: false, reason: 'no_accident' };
+            if (r === 'gas') return subject.battleTop === 'outOfGas' ? { ok: true } : { ok: false, reason: 'no_gas' };
+            if (r === 'spareTire') return subject.battleTop === 'flatTire' ? { ok: true } : { ok: false, reason: 'no_flat' };
             return { ok: false, reason: 'bad_remedy' };
         }
         case 'safety':
+            if (target && target.userId !== player.userId) return { ok: false, reason: 'safety_self_only' };
             return { ok: true };
         case 'hazard': {
             if (!target) return { ok: false, reason: 'no_target' };
             if (target.userId === player.userId) return { ok: false, reason: 'self_target' };
+            if (sameTeam(player, target)) return { ok: false, reason: 'teammate' };
             return canAttack(target, card.hazard!) ? { ok: true } : { ok: false, reason: 'cannot_attack' };
         }
         default:
@@ -151,19 +179,20 @@ export function applyPlay(
         case 'distance': {
             player.distance += card.km!;
             if (card.km === 200) player.distance200Count++;
-            if (player.distance >= room.target) {
+            if (progressOf(room, player) >= room.target) {
                 player.finished = true;
                 return { reachedTarget: true };
             }
             break;
         }
         case 'remedy': {
+            const subject = target ?? player; // may be a teammate in 2v2
             const r = card.remedy!;
-            if (r === 'go') player.battleTop = 'go';
-            else if (r === 'endLimit') player.speedLimited = false;
-            else if (r === 'repairs') player.battleTop = 'repairs';
-            else if (r === 'gas') player.battleTop = 'gas';
-            else if (r === 'spareTire') player.battleTop = 'spareTire';
+            if (r === 'go') subject.battleTop = 'go';
+            else if (r === 'endLimit') subject.speedLimited = false;
+            else if (r === 'repairs') subject.battleTop = 'repairs';
+            else if (r === 'gas') subject.battleTop = 'gas';
+            else if (r === 'spareTire') subject.battleTop = 'spareTire';
             room.discardPile.push(card);
             room.lastDiscard = card;
             break;
@@ -244,6 +273,7 @@ export function nextAliveIndex(room: MBRoom, from: number): number {
 export interface MBScore {
     userId: string;
     username: string;
+    team: 0 | 1 | null;
     distance: number;
     safetyPts: number;
     coupFourrePts: number;
@@ -258,10 +288,25 @@ export function computeScores(room: MBRoom): MBScore[] {
         const arrivalPts = p.finished ? 400 : 0;
         const total = p.distance + safetyPts + coupFourrePts + arrivalPts;
         return {
-            userId: p.userId, username: p.username,
+            userId: p.userId, username: p.username, team: p.team,
             distance: p.distance, safetyPts, coupFourrePts, arrivalPts, total,
         };
     });
+}
+
+/** Players still in the running, grouped by alive team (2v2). */
+export function aliveTeams(room: MBRoom): Set<0 | 1> {
+    const s = new Set<0 | 1>();
+    for (const p of room.players) if (p.alive && p.team != null) s.add(p.team);
+    return s;
+}
+
+/** Should the game end now? (one survivor, no human left, or a whole team wiped out in 2v2). */
+export function gameShouldEnd(room: MBRoom): boolean {
+    if (aliveCount(room) <= 1) return true;
+    if (!hasHumanAlive(room)) return true;
+    if (room.teamMode === '2v2' && aliveTeams(room).size <= 1) return true;
+    return false;
 }
 
 export { buildDeck };

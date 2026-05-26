@@ -1,5 +1,5 @@
 import { MBRoom, MBPlayer, Card, HazardType } from './types';
-import { canRoll, isSpeedLimited, canAttack } from './game';
+import { canRoll, isSpeedLimited, canAttack, sameTeam } from './game';
 
 const BOT_PREFIX = 'bot-';
 export function isBot(userId: string): boolean {
@@ -20,7 +20,9 @@ export function decideBotAction(room: MBRoom, bot: MBPlayer): BotDecision {
     if (bot.battleTop === 'accident') { const c = find(c => c.remedy === 'repairs'); if (c) return play(c); }
     if (bot.battleTop === 'outOfGas') { const c = find(c => c.remedy === 'gas'); if (c) return play(c); }
     if (bot.battleTop === 'flatTire') { const c = find(c => c.remedy === 'spareTire'); if (c) return play(c); }
-    if (!canRoll(bot)) { const c = find(c => c.remedy === 'go'); if (c) return play(c); }
+    // A green light only helps once any active hazard is cleared (can't play Go over an accident/panne/crevaison).
+    const blockedByHazard = bot.battleTop === 'accident' || bot.battleTop === 'outOfGas' || bot.battleTop === 'flatTire';
+    if (!canRoll(bot) && !blockedByHazard) { const c = find(c => c.remedy === 'go'); if (c) return play(c); }
     if (isSpeedLimited(bot)) { const c = find(c => c.remedy === 'endLimit'); if (c) return play(c); }
 
     // 2. Drive: play the largest distance that fits.
@@ -58,12 +60,12 @@ export function decideBotAction(room: MBRoom, bot: MBPlayer): BotDecision {
 }
 
 function bestTarget(room: MBRoom, bot: MBPlayer, hazard: HazardType): MBPlayer | null {
-    const candidates = room.players.filter(p => p.userId !== bot.userId && canAttack(p, hazard));
+    const candidates = room.players.filter(p => p.userId !== bot.userId && !sameTeam(bot, p) && canAttack(p, hazard));
     if (candidates.length === 0) return null;
     return candidates.sort((a, b) => b.distance - a.distance)[0];
 }
 
-function pickDiscard(bot: MBPlayer): Card {
+export function pickDiscard(bot: MBPlayer): Card {
     // Throw away a hazard first (least useful to keep), else the lowest distance, else first card.
     return bot.hand.find(c => c.kind === 'hazard')
         ?? [...bot.hand].filter(c => c.kind === 'distance').sort((a, b) => a.km! - b.km!)[0]

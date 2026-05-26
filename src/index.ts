@@ -7,14 +7,14 @@ import { setupSocketAuth, corsConfig, connectToLobby } from '@kwizar/shared';
 
 import {
     drawCard, validatePlay, applyPlay, discardCard, findPlayer, findPlayerIndex,
-    coupFourreCard, applyCoupFourre, nextAliveIndex, aliveCount, hasHumanAlive,
+    coupFourreCard, applyCoupFourre, nextAliveIndex, gameShouldEnd, teamDistanceOf,
     computeScores, pushLog, HAZARD_LABEL, REMEDY_LABEL, SAFETY_LABEL,
     HAND_SIZE, DEFAULT_TARGET,
 } from './game';
 import { Card, HazardType } from './types';
 import { rooms, createRoom } from './rooms';
 import { startTimer, clearTimer, timerCallbacks, TURN_DURATION } from './timer';
-import { decideBotAction, isBot } from './bot';
+import { decideBotAction, isBot, pickDiscard } from './bot';
 import { saveMilleBornesResults } from './api';
 import { emitState } from './state';
 
@@ -34,13 +34,19 @@ const mark = (rec: Record<string, Set<string>>, code: string, id: string) => { (
 
 // ── Configure from lobby ──────────────────────────────────────────────────────
 
-lobbySocket.on('mille_bornes:configure', ({ lobbyId: code, players, options }: {
-    lobbyId: string; players: any[]; options?: { target?: number };
+lobbySocket.on('mille_bornes:configure', ({ lobbyId: code, players, options, teams }: {
+    lobbyId: string; players: any[]; options?: { target?: number; teamMode?: 'none' | '2v2'; teamDistance?: 'individual' | 'shared' };
+    teams?: Record<string, 0 | 1> | null;
 }, ack?: () => void) => {
-    const room = createRoom(code, players, options?.target ?? DEFAULT_TARGET);
+    const room = createRoom(code, players, {
+        target: options?.target ?? DEFAULT_TARGET,
+        teamMode: options?.teamMode,
+        teamDistance: options?.teamDistance,
+        teams,
+    });
     surrendered[code] = new Set();
     afk[code] = new Set();
-    console.log(`[MilleBornes] Room ${code} (${players.length}j, cible ${room.target})`);
+    console.log(`[MilleBornes] Room ${code} (${players.length}j, cible ${room.target}, ${room.teamMode})`);
     emitState(io, room);
     startTimer(io, code);
     setTimeout(() => beginTurn(code, false), 1000);
@@ -71,7 +77,7 @@ function beginTurn(code: string, alreadyDrew: boolean): void {
 function advanceTurn(code: string): void {
     const room = rooms[code];
     if (!room || room.phase !== 'playing') return;
-    if (aliveCount(room) <= 1 || !hasHumanAlive(room)) { finishGame(code); return; }
+    if (gameShouldEnd(room)) { finishGame(code); return; }
     room.currentPlayerIndex = nextAliveIndex(room, room.currentPlayerIndex);
     beginTurn(code, false);
 }
@@ -86,6 +92,9 @@ function doBotTurn(code: string): void {
     const card = p.hand.find(c => c.id === decision.cardId);
     if (!card) { discardFallback(code, p.userId); return; }
     if (decision.type === 'discard') { doDiscard(code, p.userId, card.id); return; }
+    // Defensive guard: if the chosen play is somehow illegal, discard instead so the turn never stalls.
+    const tgt = decision.targetUserId ? findPlayer(room, decision.targetUserId) : undefined;
+    if (!validatePlay(room, p, card, tgt).ok) { doDiscard(code, p.userId, pickDiscard(p).id); return; }
     doPlay(code, p.userId, card.id, decision.targetUserId);
 }
 
@@ -205,19 +214,42 @@ function finishGame(code: string): void {
     if (!room) return;
     clearTimer(code);
     room.phase = 'ended';
-    if (!room.winnerUserId) {
-        // No exact finisher: highest distance among alive wins.
-        const ranked = [...room.players].filter(p => p.alive).sort((a, b) => b.distance - a.distance);
+
+    if (room.teamMode === '2v2') {
+        // Winning team: the finisher's team, else the only team still alive, else higher team distance.
+        let winTeam: 0 | 1 | null = room.players.find(p => p.finished)?.team ?? null;
+        if (winTeam == null) {
+            const alive0 = room.players.some(p => p.team === 0 && p.alive);
+            const alive1 = room.players.some(p => p.team === 1 && p.alive);
+            if (alive0 && !alive1) winTeam = 0;
+            else if (alive1 && !alive0) winTeam = 1;
+            else winTeam = teamDistanceOf(room, 0) >= teamDistanceOf(room, 1) ? 0 : 1;
+        }
+        room.winningTeam = winTeam;
+        room.winnerUserId = room.players.find(p => p.team === winTeam)?.userId ?? null;
+    } else if (!room.winnerUserId) {
+        // No exact finisher: highest total score among alive wins.
+        const scores = computeScores(room);
+        const totalOf = (userId: string) => scores.find(s => s.userId === userId)?.total ?? 0;
+        const ranked = [...room.players].filter(p => p.alive).sort((a, b) => totalOf(b.userId) - totalOf(a.userId));
         room.winnerUserId = ranked[0]?.userId ?? null;
     }
+
     const gameId = crypto.randomUUID();
+    const surr = surrendered[code] ?? new Set<string>();
+    const afkSet = afk[code] ?? new Set<string>();
     emitState(io, room);
     io.to(code).emit('mb:finished', {
         winnerUserId: room.winnerUserId,
-        scores: computeScores(room),
+        winningTeam: room.winningTeam,
+        scores: computeScores(room).map(s => ({
+            ...s,
+            abandon: surr.has(s.userId),
+            afk: afkSet.has(s.userId),
+        })),
         gameId,
     });
-    saveMilleBornesResults(room, gameId, surrendered[code] ?? new Set(), afk[code] ?? new Set());
+    saveMilleBornesResults(room, gameId, surr, afkSet);
     delete rooms[code];
     delete surrendered[code];
     delete afk[code];
@@ -235,10 +267,11 @@ timerCallbacks.onTimeout = (code: string) => {
     // Kick the AFK human.
     mark(afk, code, p.userId);
     p.alive = false;
+    p.exitReason = 'afk';
     p.hand = [];
     pushLog(room, 'system', `${p.username} exclu (inactivité)`);
     io.to(code).emit('mb:playerKicked', { userId: p.userId, username: p.username, reason: 'inactivity' });
-    if (aliveCount(room) <= 1 || !hasHumanAlive(room)) { finishGame(code); return; }
+    if (gameShouldEnd(room)) { finishGame(code); return; }
     advanceTurn(code);
 };
 
@@ -301,11 +334,12 @@ io.on('connection', (socket) => {
         const wasCurrent = room.players[room.currentPlayerIndex]?.userId === userId;
         mark(surrendered, code, userId);
         p.alive = false;
+        p.exitReason = 'abandon';
         p.hand = [];
         pushLog(room, 'system', `${p.username} abandonne`);
         io.to(code).emit('mb:playerSurrendered', { userId, username: p.username });
         if (room.coupFourre?.userId === userId) room.coupFourre = null;
-        if (aliveCount(room) <= 1 || !hasHumanAlive(room)) { finishGame(code); return; }
+        if (gameShouldEnd(room)) { finishGame(code); return; }
         if (wasCurrent) { clearTimer(code); advanceTurn(code); }
         else emitState(io, room);
     });
@@ -328,11 +362,12 @@ io.on('connection', (socket) => {
             const wasCurrent = r.players[r.currentPlayerIndex]?.userId === userId;
             mark(afk, code, userId);
             pl.alive = false;
+            pl.exitReason = 'afk';
             pl.hand = [];
             pushLog(r, 'system', `${pl.username} déconnecté`);
             io.to(code).emit('mb:playerKicked', { userId, username: pl.username, reason: 'inactivity' });
             if (r.coupFourre?.userId === userId) r.coupFourre = null;
-            if (aliveCount(r) <= 1 || !hasHumanAlive(r)) { finishGame(code); return; }
+            if (gameShouldEnd(r)) { finishGame(code); return; }
             if (wasCurrent) { clearTimer(code); advanceTurn(code); }
             else emitState(io, r);
         }, 60_000));
