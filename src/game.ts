@@ -1,8 +1,11 @@
 import {
-    MBRoom, MBPlayer, Card, HazardType, RemedyType, SafetyType, ConfiguredPlayer, LogTone,
+    MBRoom, MBPlayer, Card, HazardType, RemedyType, SafetyType, ConfiguredPlayer,
     HAZARD_REMEDY, HAZARD_SAFETY,
 } from './types';
 import { buildDeck, shuffle } from './deck';
+
+// Action-feed helper lives in the shared package now.
+export { pushLog } from '@kwizar/shared';
 
 export const HAND_SIZE = 6;
 export const DEFAULT_TARGET = 1000;
@@ -21,13 +24,6 @@ export const SAFETY_LABEL: Record<SafetyType, string> = {
     fuelTank: 'Citerne', punctureProof: 'Increvable',
 };
 
-const LOG_MAX = 30;
-
-/** Append an entry to the room's action feed (capped). */
-export function pushLog(room: MBRoom, tone: LogTone, text: string): void {
-    room.log.push({ id: ++room.logSeq, tone, text });
-    if (room.log.length > LOG_MAX) room.log.splice(0, room.log.length - LOG_MAX);
-}
 
 // ── Players ─────────────────────────────────────────────────────────────────
 

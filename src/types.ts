@@ -1,3 +1,6 @@
+import type { GameLogEntry } from '@kwizar/shared';
+export type { LogTone } from '@kwizar/shared';
+
 // ── Card model ──────────────────────────────────────────────────────────────
 
 export type HazardType = 'stop' | 'speedLimit' | 'accident' | 'outOfGas' | 'flatTire';
@@ -58,14 +61,6 @@ export type TeamDistance = 'individual' | 'shared';
 
 export type Phase = 'playing' | 'ended';
 
-export type LogTone = 'move' | 'attack' | 'defend' | 'safety' | 'coup' | 'system';
-
-export interface MBLogEntry {
-    id: number;
-    tone: LogTone;
-    text: string;
-}
-
 export interface CoupFourreWindow {
     userId: string;        // player who may respond
     safety: SafetyType;    // the safety they hold
@@ -86,7 +81,7 @@ export interface MBRoom {
     coupFourre: CoupFourreWindow | null;
     turnStartedAt: number | null;
     turnDuration: number;
-    log: MBLogEntry[];
+    log: GameLogEntry[];
     logSeq: number;
     afkStrikes: Record<string, number>;
     socketIds: Map<string, string>;
