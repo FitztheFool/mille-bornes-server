@@ -46,7 +46,7 @@ lobbySocket.on('mille_bornes:configure', ({ lobbyId: code, players, options, tea
     });
     surrendered[code] = new Set();
     afk[code] = new Set();
-    console.log(`[MilleBornes] Room ${code} (${players.length}j, cible ${room.target}, ${room.teamMode})`);
+    console.log(`[MILLE_BORNES] Room ${code} (${players.length}j, cible ${room.target}, ${room.teamMode})`);
     emitState(io, room);
     startTimer(io, code);
     setTimeout(() => beginTurn(code, false), 1000);
@@ -137,7 +137,7 @@ function doPlay(code: string, userId: string, cardId: string, targetUserId?: str
     if (!card) return;
     const target = targetUserId ? findPlayer(room, targetUserId) : undefined;
     const v = validatePlay(room, player, card, target);
-    if (!v.ok) { console.log(`[MilleBornes] invalid play ${userId}:`, card, v.reason); return; }
+    if (!v.ok) { console.log(`[MILLE_BORNES] invalid play ${userId}:`, card, v.reason); return; }
 
     room.afkStrikes[userId] = 0;
     const isSafety = card.kind === 'safety';
@@ -377,7 +377,7 @@ io.on('connection', (socket) => {
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT ?? 10014;
-server.listen(PORT, () => console.log('[MILLE_BORNES] listening on', PORT));
+server.listen(PORT, () => console.log('[MILLE_BORNES] listening on port', PORT));
 const shutdown = () => { io.close(() => server.close(() => process.exit(0))); setTimeout(() => process.exit(1), 3000).unref(); };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
