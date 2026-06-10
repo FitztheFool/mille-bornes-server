@@ -1,8 +1,11 @@
-import { saveAttempts, ScoreEntry } from '@kwizar/shared';
+import type { Server } from 'socket.io';
+import { saveAttemptsAndEmit, ScoreEntry } from '@kwizar/shared';
 import { MBRoom } from './types';
 import { computeScores } from './game';
 
 export function saveMilleBornesResults(
+    io: Server,
+    code: string,
     room: MBRoom,
     gameId: string,
     surrenderUserIds: Set<string> = new Set(),
@@ -36,5 +39,5 @@ export function saveMilleBornesResults(
         };
     });
 
-    saveAttempts('MILLE_BORNES', gameId, entries, vsBot);
+    saveAttemptsAndEmit(io, code, 'MILLE_BORNES', gameId, entries, vsBot);
 }

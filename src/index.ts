@@ -249,7 +249,7 @@ function finishGame(code: string): void {
         })),
         gameId,
     });
-    saveMilleBornesResults(room, gameId, surr, afkSet);
+    saveMilleBornesResults(io, code, room, gameId, surr, afkSet);
     delete rooms[code];
     delete surrendered[code];
     delete afk[code];
