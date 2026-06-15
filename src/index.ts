@@ -34,9 +34,10 @@ const mark = (rec: Record<string, Set<string>>, code: string, id: string) => { (
 
 // ── Configure from lobby ──────────────────────────────────────────────────────
 
-lobbySocket.on('mille_bornes:configure', ({ lobbyId: code, players, options, teams }: {
+lobbySocket.on('mille_bornes:configure', ({ lobbyId: code, players, options, teams, turnSeconds }: {
     lobbyId: string; players: any[]; options?: { target?: number; teamMode?: 'none' | '2v2'; teamDistance?: 'individual' | 'shared' };
     teams?: Record<string, 0 | 1> | null;
+    turnSeconds?: number | null;
 }, ack?: () => void) => {
     const room = createRoom(code, players, {
         target: options?.target ?? DEFAULT_TARGET,
@@ -44,6 +45,7 @@ lobbySocket.on('mille_bornes:configure', ({ lobbyId: code, players, options, tea
         teamDistance: options?.teamDistance,
         teams,
     });
+    if (turnSeconds != null) room.turnDuration = turnSeconds;
     surrendered[code] = new Set();
     afk[code] = new Set();
     console.log(`[MILLE_BORNES] Room ${code} (${players.length}j, cible ${room.target}, ${room.teamMode})`);
