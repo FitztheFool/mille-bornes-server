@@ -284,12 +284,15 @@ io.on('connection', (socket) => {
         const userId = socket.data?.userId as string;
         const room = rooms[code];
         if (!room) { socket.emit('notFound'); return; }
-        if (!userId || !room.players.some(p => p.userId === userId)) { socket.emit('mb:accessDenied'); return; }
+        if (!userId) { socket.emit('mb:accessDenied'); return; }
         socket.data.lobbyId = code;
         socket.join(code);
-        room.socketIds.set(userId, socket.id);
-        const t = room.disconnectTimers.get(userId);
-        if (t) { clearTimeout(t); room.disconnectTimers.delete(userId); }
+        // Joueur : (re)mappe son socket + reconnexion. Non-joueur : rejoint en spectateur (vue Dieu).
+        if (room.players.some(p => p.userId === userId)) {
+            room.socketIds.set(userId, socket.id);
+            const t = room.disconnectTimers.get(userId);
+            if (t) { clearTimeout(t); room.disconnectTimers.delete(userId); }
+        }
         emitState(io, room);
     });
 

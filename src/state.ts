@@ -4,6 +4,8 @@ import { canRoll, isSpeedLimited } from './game';
 
 export function buildStateFor(room: MBRoom, viewerId: string | null) {
     const current = room.players[room.currentPlayerIndex];
+    // Spectateur : vue Dieu (Mille Bornes n'est pas un jeu de déduction) → voit toutes les mains.
+    const isSpectator = viewerId ? !room.players.some(p => p.userId === viewerId) : true;
 
     const players = room.players.map(p => ({
         userId: p.userId,
@@ -19,8 +21,8 @@ export function buildStateFor(room: MBRoom, viewerId: string | null) {
         exitReason: p.exitReason ?? null,
         team: p.team,
         coupsFourres: p.coupsFourres,
-        // Only the viewer sees their own hand.
-        ...(p.userId === viewerId ? { hand: p.hand } : {}),
+        // Le joueur voit sa main ; le spectateur voit toutes les mains (vue Dieu).
+        ...((p.userId === viewerId || isSpectator) ? { hand: p.hand } : {}),
     }));
 
     // Coup fourré window only surfaced to the concerned player.
@@ -45,7 +47,7 @@ export function buildStateFor(room: MBRoom, viewerId: string | null) {
         winningTeam: room.winningTeam,
         log: room.log.slice(-10),
         players,
-        spectator: viewerId ? !room.players.some(p => p.userId === viewerId) : true,
+        spectator: isSpectator,
     };
 }
 
