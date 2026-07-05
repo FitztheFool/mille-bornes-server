@@ -1,10 +1,7 @@
 import { MBRoom, MBPlayer, Card, HazardType } from './types';
 import { canRoll, isSpeedLimited, canAttack, sameTeam } from './game';
 
-const BOT_PREFIX = 'bot-';
-export function isBot(userId: string): boolean {
-    return userId.startsWith(BOT_PREFIX);
-}
+export { isBotId as isBot } from '@kwizar/shared';
 
 export interface BotDecision {
     type: 'play' | 'discard';

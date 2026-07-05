@@ -1,9 +1,6 @@
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
-import { setupSocketAuth, corsConfig, connectToLobby } from '@kwizar/shared';
+import { createGameServer } from '@kwizar/shared';
 
 import {
     drawCard, validatePlay, applyPlay, discardCard, findPlayer, findPlayerIndex,
@@ -20,12 +17,7 @@ import { emitState } from './state';
 
 dotenv.config();
 
-const app = express();
-app.get('/health', (_req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.status(200).send('ok'); });
-const server = http.createServer(app);
-const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
-setupSocketAuth(io, new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? process.env.INTERNAL_API_KEY)!));
-const lobbySocket = connectToLobby('mille-bornes-server', 'mille_bornes');
+const { io, lobbySocket, listen } = createGameServer({ serviceName: 'mille-bornes-server', gameType: 'mille_bornes', defaultPort: 10014 });
 
 // Track abandons/AFK per room for final scoring.
 const surrendered: Record<string, Set<string>> = {};
@@ -381,10 +373,6 @@ io.on('connection', (socket) => {
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
-const PORT = process.env.PORT ?? 10014;
-server.listen(PORT, () => console.log('[MILLE_BORNES] listening on port', PORT));
-const shutdown = () => { io.close(() => server.close(() => process.exit(0))); setTimeout(() => process.exit(1), 3000).unref(); };
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+listen();
 
 void TURN_DURATION;
